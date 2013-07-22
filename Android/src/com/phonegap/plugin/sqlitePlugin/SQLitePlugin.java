@@ -35,18 +35,38 @@ public class SQLitePlugin extends CordovaPlugin
 	/**
 	 * Multiple database map.
 	 */
-	HashMap<String, Long> dbmap;
+	static HashMap<String, Long> dbmap = null;
 
 	static {
 		System.loadLibrary("sqlg");
 	}
 
+	/**
+	 * Get a database from the db map.
+	 *
+	 * @param dbname
+	 *            The name of the database.
+	 *
+	 */
+	// XXX TBD GONE for this version:
+	//public static SQLiteDatabase getSQLiteDatabase(String dbname)
+	//public static SQLiteDatabase getDatabase(String dbname)
+	// XXX TBD will be
+	//public static long getSqLiteGlueDatabase(String dbname)
+	/**
+	{
+		return dbmap.get(dbname);
+	}
+	**/
 
 	/**
 	 * Constructor.
 	 */
 	public SQLitePlugin() {
-		dbmap = new HashMap<String, Long>();
+		// XXX TBD move to static section:
+		if (dbmap == null) {
+			dbmap = new HashMap<String, Long>();
+		}
 	}
 
 	/**
@@ -81,7 +101,7 @@ public class SQLitePlugin extends CordovaPlugin
 				String dbName = args.getString(0);
 				String query = args.getString(1);
 
-				Cursor myCursor = this.getDatabase(dbName).rawQuery(query, null);
+				Cursor myCursor = getDatabase(dbName).rawQuery(query, null);
 				this.processPragmaResults(myCursor, id);
 			}
 			**/
@@ -117,9 +137,12 @@ public class SQLitePlugin extends CordovaPlugin
 						jsonparams[i] 	= jsonArr;
 					}
 				}
-				if(trans_id != null)
-					this.executeSqlBatch(dbName, queries, jsonparams, queryIDs, trans_id);
-				else
+				if(trans_id != null) {
+					if (false) // XXX FUTURE use parameter
+						this.executeSqlBatchInBackground(dbName, queries, jsonparams, queryIDs, trans_id);
+					else
+						this.executeSqlBatch(dbName, queries, jsonparams, queryIDs, trans_id);
+				} else
 					Log.v("error", "null trans_id");
 			}
 
@@ -138,10 +161,10 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	@Override
 	public void onDestroy() {
-		while (!this.dbmap.isEmpty()) {
-			String dbname = this.dbmap.keySet().iterator().next();
+		while (!dbmap.isEmpty()) {
+			String dbname = dbmap.keySet().iterator().next();
 			this.closeDatabase(dbname);
-			this.dbmap.remove(dbname);
+			dbmap.remove(dbname);
 		}
 	}
 
@@ -161,7 +184,7 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	private boolean openDatabase(String dbname, String password) //throws SQLiteException
 	{
-		if (this.getDatabase(dbname) != null) this.closeDatabase(dbname);
+		if (getDatabase(dbname) != null) this.closeDatabase(dbname);
 
 		String dbfilepath = this.cordova.getActivity().getDatabasePath(dbname + ".db").getAbsolutePath();
 
@@ -190,10 +213,11 @@ public class SQLitePlugin extends CordovaPlugin
 		if (mydb != null)
 		{
 			SQLiteGlue.sqlg_db_close(mydb.longValue());
-			this.dbmap.remove(dbName);
+			dbmap.remove(dbName);
 		}
 	}
 
+	// XXX TBD will be restored:
 	/**
 	 * Get a database from the db map.
 	 *
@@ -202,8 +226,41 @@ public class SQLitePlugin extends CordovaPlugin
 	 *
 	 */
 	private Long getDatabase(String dbname)
+	// XXX restored for this version:
 	{
 		return dbmap.get(dbname);
+	}
+	// **/
+
+	/**
+	 * Executes a batch request IN BACKGROUND THREAD and sends the results via sendJavascriptCB().
+	 *
+	 * @param dbName
+	 *            The name of the database.
+	 *
+	 * @param queryarr
+	 *            Array of query strings
+	 *
+	 * @param jsonparams
+	 *            Array of JSON query parameters
+	 *
+	 * @param queryIDs
+	 *            Array of query ids
+	 *
+	 * @param tx_id
+	 *            Transaction id
+	 *
+	 */
+	private void executeSqlBatchInBackground(final String dbName,
+		final String[] queryarr, final JSONArray[] jsonparams, final String[] queryIDs, final String tx_id)
+	{
+		final SQLitePlugin myself = this;
+
+		this.cordova.getThreadPool().execute(new Runnable() {
+			public void run() {
+				myself.executeSqlBatch(dbName, queryarr, jsonparams, queryIDs, tx_id);
+			}
+		});
 	}
 
 	/**
@@ -227,7 +284,6 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	private void executeSqlBatch(String dbname, String[] queryarr, JSONArray[] jsonparams, String[] queryIDs, String tx_id)
 	{
-		//long mydb = this.getDatabase(dbname);
 		Long db = this.getDatabase(dbname);
 
 		if (db == null) return;
@@ -235,6 +291,7 @@ public class SQLitePlugin extends CordovaPlugin
 		long mydb = db.longValue();
 
 		try {
+			// XXX TODO:
 			//mydb.beginTransaction();
 
 			String query = "";
@@ -246,7 +303,7 @@ public class SQLitePlugin extends CordovaPlugin
 				query_id = queryIDs[i];
 
 				/**
-				// for old Android SDK remove lines from HERE:
+				// /* OPTIONAL changes for new Android SDK from HERE:
 				if (android.os.Build.VERSION.SDK_INT >= 11 &&
 				    (query.toLowerCase().startsWith("update") ||
 				     query.toLowerCase().startsWith("delete")))
@@ -315,7 +372,6 @@ public class SQLitePlugin extends CordovaPlugin
 
 					long st = SQLiteGlue.sqlg_db_prepare_st(mydb, query);
 
-					// /** XXX TODO:
 					if (jsonparams != null) {
 						//params = new String[jsonparams[i].length()];
 
@@ -329,7 +385,6 @@ public class SQLitePlugin extends CordovaPlugin
 								SQLiteGlue.sqlg_st_bind_text(st, j + 1, jsonparams[i].getString(j));
 						}
 					}
-					// **/
 
 					int r1 = SQLiteGlue.sqlg_st_step(st);
 
@@ -344,6 +399,7 @@ public class SQLitePlugin extends CordovaPlugin
 					//SQLiteGlue.sqlg_st_finish(st);
 				}
 			}
+			// XXX TODO:
 			//mydb.setTransactionSuccessful();
 		}
 		/**
@@ -358,6 +414,7 @@ public class SQLitePlugin extends CordovaPlugin
 			this.sendJavascriptCB("window.SQLitePluginTransactionCB.txErrorCallback('" + tx_id + "', '"+ex.getMessage()+"');");
 		}
 		finally {
+			// XXX TODO:
 			//mydb.endTransaction();
 			Log.v("executeSqlBatch", tx_id);
 			this.sendJavascriptCB("window.SQLitePluginTransactionCB.txCompleteCallback('" + tx_id + "');");
@@ -484,6 +541,14 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	private void sendJavascriptCB(String cb)
 	{
-		this.webView.sendJavascript(cb);
+		//this.webView.sendJavascript(cb);
+		final String mycb = cb;
+		final SQLitePlugin myself = this;
+
+		this.cordova.getActivity().runOnUiThread(new Runnable() {
+			public void run() {
+				myself.webView.sendJavascript(mycb);
+			}
+		});
 	}
 }

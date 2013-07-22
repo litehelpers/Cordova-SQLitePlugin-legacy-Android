@@ -20,11 +20,6 @@ import java.util.HashMap;
 import org.apache.cordova.api.CordovaPlugin;
 import org.apache.cordova.api.CallbackContext;
 
-//import android.database.Cursor;
-//import android.database.sqlite.*;
-
-//import com.almworks.sqlite4java.*;
-
 import org.sqlg.SQLiteGlue;
 
 import android.util.Base64;
@@ -35,39 +30,33 @@ public class SQLitePlugin extends CordovaPlugin
 	/**
 	 * Multiple database map.
 	 */
-	static HashMap<String, Long> dbmap = null;
+	static HashMap<String, Long> dbmap = new HashMap<String, Long>();
 
 	static {
 		System.loadLibrary("sqlg");
 	}
 
 	/**
-	 * Get a database from the db map.
+	 * Get a SQLiteGlue database reference from the db map (public static accessor).
 	 *
 	 * @param dbname
 	 *            The name of the database.
 	 *
 	 */
-	// XXX TBD GONE for this version:
-	//public static SQLiteDatabase getSQLiteDatabase(String dbname)
-	//public static SQLiteDatabase getDatabase(String dbname)
-	// XXX TBD will be
-	//public static long getSqLiteGlueDatabase(String dbname)
-	/**
+	public static long getSQLiteGlueDatabase(String dbname)
 	{
 		return dbmap.get(dbname);
 	}
-	**/
 
 	/**
+         * XXX GONE:
 	 * Constructor.
-	 */
 	public SQLitePlugin() {
 		// XXX TBD move to static section:
 		if (dbmap == null) {
 			dbmap = new HashMap<String, Long>();
 		}
-	}
+	} */
 
 	/**
 	 * Executes the request and returns PluginResult.
@@ -217,7 +206,6 @@ public class SQLitePlugin extends CordovaPlugin
 		}
 	}
 
-	// XXX TBD will be restored:
 	/**
 	 * Get a database from the db map.
 	 *
@@ -226,11 +214,9 @@ public class SQLitePlugin extends CordovaPlugin
 	 *
 	 */
 	private Long getDatabase(String dbname)
-	// XXX restored for this version:
 	{
 		return dbmap.get(dbname);
 	}
-	// **/
 
 	/**
 	 * Executes a batch request IN BACKGROUND THREAD and sends the results via sendJavascriptCB().
@@ -335,46 +321,39 @@ public class SQLitePlugin extends CordovaPlugin
 					this.sendJavascriptCB("window.SQLitePluginTransactionCB.queryCompleteCallback('" +
 						tx_id + "','" + query_id + "', " + result + ");");
 				} else // to HERE.
-				**/
+				**/ // XXX TODO bindings for UPDATE & rowsAffected for UPDATE/DELETE/INSERT
 				if (query.toLowerCase().startsWith("insert") && jsonparams != null) {
-					//SQLiteStatement myStatement = mydb.compileStatement(query);
+					/* prepare/compile statement: */
 					long st = SQLiteGlue.sqlg_db_prepare_st(mydb, query);
 
 					for (int j = 0; j < jsonparams[i].length(); j++) {
 						if (jsonparams[i].get(j) instanceof Float || jsonparams[i].get(j) instanceof Double ) {
-							//myStatement.bind(j + 1, jsonparams[i].getDouble(j));
 							SQLiteGlue.sqlg_st_bind_double(st, j + 1, jsonparams[i].getDouble(j));
 						} else if (jsonparams[i].get(j) instanceof Number) {
-							//myStatement.bind(j + 1, jsonparams[i].getLong(j));
 							SQLiteGlue.sqlg_st_bind_int64(st, j + 1, jsonparams[i].getLong(j));
+						// XXX TODO bind null:
 						//} else if (jsonparams[i].isNull(j)) {
 						//	myStatement.bindNull(j + 1);
 						} else {
-							//myStatement.bind(j + 1, jsonparams[i].getString(j));
 							SQLiteGlue.sqlg_st_bind_text(st, j + 1, jsonparams[i].getString(j));
 						}
 					}
-					//long insertId = myStatement.executeInsert();
 
-					//myStatement.step();
 					int r1 = SQLiteGlue.sqlg_st_step(st);
 
+					// XXX TODO get insertId
+
 					//String result = "{'insertId':'" + insertId + "', 'rowsAffected':1}";
-					//String result = "{}"; // XXX TODO
 					String result = "{'rowsAffected':1}";
-					//myStatement.dispose();
+
 					SQLiteGlue.sqlg_st_finish(st);
 
 					this.sendJavascriptCB("window.SQLitePluginTransactionCB.queryCompleteCallback('" +
 						tx_id + "','" + query_id + "', " + result + ");");
 				} else {
-					//String[] params = null;
-
 					long st = SQLiteGlue.sqlg_db_prepare_st(mydb, query);
 
 					if (jsonparams != null) {
-						//params = new String[jsonparams[i].length()];
-
 						for (int j = 0; j < jsonparams[i].length(); j++) {
 							//if (jsonparams[i].isNull(j))
 								//params[j] = "";

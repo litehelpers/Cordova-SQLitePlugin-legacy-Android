@@ -20,9 +20,7 @@ import java.util.HashMap;
 import org.apache.cordova.api.CordovaPlugin;
 import org.apache.cordova.api.CallbackContext;
 
-import android.database.Cursor;
-
-import android.database.sqlite.*;
+import org.sqlg.SQLiteGlue;
 
 import android.util.Base64;
 import android.util.Log;
@@ -32,16 +30,20 @@ public class SQLitePlugin extends CordovaPlugin
 	/**
 	 * Multiple database map (static).
 	 */
-	static HashMap<String, SQLiteDatabase> dbmap = new HashMap<String, SQLiteDatabase>();
+	static HashMap<String, Long> dbmap = new HashMap<String, Long>();
+
+	static {
+		System.loadLibrary("sqlg");
+	}
 
 	/**
-	 * Get a SQLiteDatabase reference from the db map (public static accessor).
+	 * Get a SQLiteGlue database reference from the db map (public static accessor).
 	 *
 	 * @param dbname
 	 *            The name of the database.
 	 *
 	 */
-	public static SQLiteDatabase getSQLiteDatabase(String dbname)
+	public static long getSQLiteGlueDatabase(String dbname)
 	{
 		return dbmap.get(dbname);
 	}
@@ -71,11 +73,12 @@ public class SQLitePlugin extends CordovaPlugin
 				JSONObject o = args.getJSONObject(0);
 				String dbname = o.getString("name");
 
-				this.openDatabase(dbname, null);
+				return this.openDatabase(dbname, null);
 			}
 			else if (action.equals("close")) {
 				this.closeDatabase(args.getString(0));
 			}
+			/**
 			else if (action.equals("executePragmaStatement"))
 			{
 				String dbName = args.getString(0);
@@ -102,6 +105,7 @@ public class SQLitePlugin extends CordovaPlugin
 
 				this.sendJavascriptCB("window.SQLitePluginCallback.p1('" + id + "', " + result + ");");
 			}
+			**/
 			else if (action.equals("executeSqlBatch") || action.equals("backgroundExecuteSqlBatch"))
 			{
 				String[] 	queries 	= null;
@@ -179,17 +183,21 @@ public class SQLitePlugin extends CordovaPlugin
 	 *            The database password or null.
 	 *
 	 */
-	private void openDatabase(String dbname, String password)
+	private boolean openDatabase(String dbname, String password) //throws SQLiteException
 	{
 		if (this.getDatabase(dbname) != null) this.closeDatabase(dbname);
 
-		File dbfile = this.cordova.getActivity().getDatabasePath(dbname + ".db");
+		String dbfilepath = this.cordova.getActivity().getDatabasePath(dbname + ".db").getAbsolutePath();
 
-		Log.v("info", "Open sqlite db: " + dbfile.getAbsolutePath());
+		Log.v("info", "Open dbfilepath: " + dbfilepath);
 
-		SQLiteDatabase mydb = SQLiteDatabase.openOrCreateDatabase(dbfile, null);
+		long mydb = SQLiteGlue.sqlg_db_open(dbfilepath, SQLiteGlue.SQLG_OPEN_READWRITE | SQLiteGlue.SQLG_OPEN_CREATE);
+
+		if (mydb < 0) return false;
 
 		dbmap.put(dbname, mydb);
+
+		return true;
 	}
 
 	/**
@@ -201,11 +209,11 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	private void closeDatabase(String dbName)
 	{
-		SQLiteDatabase mydb = this.getDatabase(dbName);
+		Long mydb = this.getDatabase(dbName);
 
 		if (mydb != null)
 		{
-			mydb.close();
+			SQLiteGlue.sqlg_db_close(mydb.longValue());
 			dbmap.remove(dbName);
 		}
 	}
@@ -217,7 +225,7 @@ public class SQLitePlugin extends CordovaPlugin
 	 *            The name of the database.
 	 *
 	 */
-	private SQLiteDatabase getDatabase(String dbname)
+	private Long getDatabase(String dbname)
 	{
 		return dbmap.get(dbname);
 	}
@@ -274,14 +282,17 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	private void executeSqlBatch(String dbname, String[] queryarr, JSONArray[] jsonparams, String[] queryIDs, String tx_id)
 	{
-		SQLiteDatabase mydb = this.getDatabase(dbname);
+		Long db = this.getDatabase(dbname);
 
-		if (mydb == null) return;
+		if (db == null) return;
+
+		long mydb = db.longValue();
 
 		try {
+			// XXX TODO:
 			/* BEGIN (exclusive): */
 			{
-				mydb.beginTransaction();
+				//mydb.beginTransaction();
 			}
 
 			String query = "";
@@ -294,23 +305,26 @@ public class SQLitePlugin extends CordovaPlugin
 
 				String query_result = "";
 
+				// XXX TODO bindings for UPDATE & rowsAffected for UPDATE/DELETE/INSERT
+				/**
 				// /* OPTIONAL changes for new Android SDK from HERE:
 				if (android.os.Build.VERSION.SDK_INT >= 11 &&
 				    (query.toLowerCase().startsWith("update") ||
 				     query.toLowerCase().startsWith("delete")))
 				{
-					SQLiteStatement myStatement = mydb.compileStatement(query);
+					//SQLiteStatement myStatement = mydb.compileStatement(query);
+					SQLiteStatement myStatement = mydb.prepare(query);
 
 					if (jsonparams != null) {
 						for (int j = 0; j < jsonparams[i].length(); j++) {
 							if (jsonparams[i].get(j) instanceof Float || jsonparams[i].get(j) instanceof Double ) {
-								myStatement.bindDouble(j + 1, jsonparams[i].getDouble(j));
+								myStatement.bind(j + 1, jsonparams[i].getDouble(j));
 							} else if (jsonparams[i].get(j) instanceof Number) {
-								myStatement.bindLong(j + 1, jsonparams[i].getLong(j));
+								myStatement.bind(j + 1, jsonparams[i].getLong(j));
 							} else if (jsonparams[i].isNull(j)) {
 								myStatement.bindNull(j + 1);
 							} else {
-								myStatement.bindString(j + 1, jsonparams[i].getString(j));
+								myStatement.bind(j + 1, jsonparams[i].getString(j));
 							}
 						}
 					}
@@ -320,46 +334,54 @@ public class SQLitePlugin extends CordovaPlugin
 					query_result = "{'rowsAffected':" + rowsAffected + "}";
 				} else // to HERE. */
 				if (query.toLowerCase().startsWith("insert") && jsonparams != null) {
-					SQLiteStatement myStatement = mydb.compileStatement(query);
+					/* prepare/compile statement: */
+					long st = SQLiteGlue.sqlg_db_prepare_st(mydb, query);
 
 					for (int j = 0; j < jsonparams[i].length(); j++) {
 						if (jsonparams[i].get(j) instanceof Float || jsonparams[i].get(j) instanceof Double ) {
-							myStatement.bindDouble(j + 1, jsonparams[i].getDouble(j));
+							SQLiteGlue.sqlg_st_bind_double(st, j + 1, jsonparams[i].getDouble(j));
 						} else if (jsonparams[i].get(j) instanceof Number) {
-							myStatement.bindLong(j + 1, jsonparams[i].getLong(j));
-						} else if (jsonparams[i].isNull(j)) {
-							myStatement.bindNull(j + 1);
+							SQLiteGlue.sqlg_st_bind_int64(st, j + 1, jsonparams[i].getLong(j));
+						// XXX TODO bind null:
+						//} else if (jsonparams[i].isNull(j)) {
+						//	myStatement.bindNull(j + 1);
 						} else {
-							myStatement.bindString(j + 1, jsonparams[i].getString(j));
+							SQLiteGlue.sqlg_st_bind_text(st, j + 1, jsonparams[i].getString(j));
 						}
 					}
 
-					long insertId = myStatement.executeInsert();
-					
-					int rowsAffected = (insertId == -1) ? 0 : 1;
+					int r1 = SQLiteGlue.sqlg_st_step(st);
 
-					query_result = "{'insertId':'" + insertId + "', 'rowsAffected':'" + rowsAffected +"'}";
+					// XXX TODO get insertId
+
+					SQLiteGlue.sqlg_st_finish(st);
+
+					//query_result = "{'insertId':'" + insertId + "', 'rowsAffected':'" + rowsAffected +"'}";
+					query_result = "{'rowsAffected':1}";
 				} else {
-					String[] params = null;
+					long st = SQLiteGlue.sqlg_db_prepare_st(mydb, query);
 
 					if (jsonparams != null) {
-						params = new String[jsonparams[i].length()];
-
 						for (int j = 0; j < jsonparams[i].length(); j++) {
-							if (jsonparams[i].isNull(j))
-								params[j] = "";
-							else
-								params[j] = jsonparams[i].getString(j);
+							//if (jsonparams[i].isNull(j))
+								//params[j] = "";
+								//myStatement.bindNull(j + 1);
+							//else
+								//params[j] = jsonparams[i].getString(j);
+								//myStatement.bind(j + 1, jsonparams[i].getString(j));
+								SQLiteGlue.sqlg_st_bind_text(st, j + 1, jsonparams[i].getString(j));
 						}
 					}
 
-					Cursor myCursor = mydb.rawQuery(query, params);
+					int r1 = SQLiteGlue.sqlg_st_step(st);
 
-					if (query_id.length() > 0) {
-						query_result = this.getResultFromQuery(myCursor);
+					if ((r1 == 100) && query_id.length() > 0)
+						query_result = this.getResultFromQuery(st);
+					else if (query_id.length() > 0) {
+						query_result = "[]";
 					}
 
-					myCursor.close();
+					//SQLiteGlue.sqlg_st_finish(st);
 				}
 
 				if (query_result.length() > 0) {
@@ -368,24 +390,28 @@ public class SQLitePlugin extends CordovaPlugin
 				}
 			}
 
+			// XXX TODO:
 			/* Mark for COMMIT: */
 			{
-				mydb.setTransactionSuccessful();
+				//mydb.setTransactionSuccessful();
 			}
 		}
+		/**
 		catch (SQLiteException ex) {
 			ex.printStackTrace();
 			Log.v("executeSqlBatch", "SQLitePlugin.executeSql(): Error=" +  ex.getMessage());
 			this.sendJavascriptCB("window.SQLitePluginTransactionCB.txErrorCallback('" + tx_id + "', '"+ex.getMessage()+"');");
-		} catch (JSONException ex) {
+		} **/
+		catch (JSONException ex) {
 			ex.printStackTrace();
 			Log.v("executeSqlBatch", "SQLitePlugin.executeSql(): Error=" +  ex.getMessage());
 			this.sendJavascriptCB("window.SQLitePluginTransactionCB.txErrorCallback('" + tx_id + "', '"+ex.getMessage()+"');");
 		}
 		finally {
+			// XXX TODO:
 			/* COMMIT or ROLLBACK: */
 			{
-				mydb.endTransaction();
+				//mydb.endTransaction();
 			}
 			Log.v("executeSqlBatch", tx_id);
 			this.sendJavascriptCB("window.SQLitePluginTransactionCB.txCompleteCallback('" + tx_id + "');");
@@ -401,24 +427,25 @@ public class SQLitePlugin extends CordovaPlugin
 	 * @return results in string form
 	 *
 	 */
-	private String getResultFromQuery(Cursor cur)
+	private String getResultFromQuery(long st)
 	{
 		String result = "[]";
 
 		// If query result has rows
-		if (cur.moveToFirst()) {
+		//if (cur.moveToFirst()) {
 			JSONArray fullresult = new JSONArray();
 			String key = "";
-			int colCount = cur.getColumnCount();
+
+			int colCount = SQLiteGlue.sqlg_st_column_count(st);
 
 			// Build up JSON result object for each row
 			do {
 				JSONObject row = new JSONObject();
 				try {
 					for (int i = 0; i < colCount; ++i) {
-						key = cur.getColumnName(i);
+						key = SQLiteGlue.sqlg_st_column_name(st, i);
 
-						// for old Android SDK remove lines from HERE:
+						/* // for old Android SDK remove lines from HERE:
 						if(android.os.Build.VERSION.SDK_INT >= 11)
 						{
 							switch(cur.getType (i))
@@ -440,9 +467,9 @@ public class SQLitePlugin extends CordovaPlugin
 									break;
 							}
 						}
-						else // to HERE.
+						else // to HERE.*/
 						{
-							row.put(key, cur.getString(i));
+							row.put(key, SQLiteGlue.sqlg_st_column_text(st, i));
 						}
 					}
 
@@ -452,10 +479,10 @@ public class SQLitePlugin extends CordovaPlugin
 					e.printStackTrace();
 				}
 
-			} while (cur.moveToNext());
+			} while (SQLiteGlue.sqlg_st_step(st) == 100); /* SQLITE_ROW */
 
 			result = fullresult.toString();
-		}
+		//}
 
 		return result;
 	}

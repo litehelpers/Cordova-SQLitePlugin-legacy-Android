@@ -311,6 +311,8 @@ public class SQLitePlugin extends CordovaPlugin
 
 				String query_result = "";
 
+				int step_return = 0;
+
 				// XXX TODO bindings for UPDATE & rowsAffected for UPDATE/DELETE/INSERT
 				/**
 				// /* OPTIONAL changes for new Android SDK from HERE:
@@ -356,7 +358,7 @@ public class SQLitePlugin extends CordovaPlugin
 						}
 					}
 
-					int r1 = SQLiteGlue.sqlg_st_step(st);
+					step_return = SQLiteGlue.sqlg_st_step(st);
 
 					// XXX TODO get insertId
 
@@ -379,9 +381,9 @@ public class SQLitePlugin extends CordovaPlugin
 						}
 					}
 
-					int r1 = SQLiteGlue.sqlg_st_step(st);
+					step_return = SQLiteGlue.sqlg_st_step(st);
 
-					if ((r1 == 100) && query_id.length() > 0)
+					if ((step_return == 100) && query_id.length() > 0)
 						//query_result = this.getResultFromQuery(st);
 						query_result = "{ 'rows': " + this.getResultFromQuery(st) + "}";
 					else if (query_id.length() > 0) {
@@ -391,6 +393,11 @@ public class SQLitePlugin extends CordovaPlugin
 					//SQLiteGlue.sqlg_st_finish(st);
 				}
 
+				if (step_return != 0 && step_return < 100) {
+					this.sendJavascriptCB("window.SQLiteQueryCB.queryErrorCallback('" +
+						tx_id + "','" + query_id + "', '" + "query failure" + "');");
+				}
+				else
 				if (query_result.length() > 0) {
 					this.sendJavascriptCB("window.SQLiteQueryCB.queryCompleteCallback('" +
 						tx_id + "','" + query_id + "', " + query_result + ");");

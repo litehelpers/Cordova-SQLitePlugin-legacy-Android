@@ -26,17 +26,25 @@ do ->
     @open @openSuccess, @openError
     return
 
+  SQLitePlugin::databaseFeatures = isSQLitePluginDatabase: true
   SQLitePlugin::openDBs = {}
 
+  SQLitePlugin::txQ = []
+
   SQLitePlugin::transaction = (fn, error, success) ->
-    t = new SQLitePluginTransaction(@dbname)
-    fn t
-    t.complete success, error
+    t = new SQLitePluginTransaction(this, fn, error, success)
+    @txQ.push t
+    if @txQ.length is 1
+      t.start()
+    return
+
+  SQLitePlugin::startNextTransaction = ->
+    @txQ.shift()
+    if @txQ[0]
+      @txQ[0].start()
     return
 
   SQLitePlugin::open = (success, error) ->
-    console.log "SQLitePlugin.prototype.open"
-
     unless @dbname of @openDBs
       @openDBs[@dbname] = true
       cordova.exec success, error, "SQLitePlugin", "open", [ @openargs ]
@@ -55,6 +63,14 @@ do ->
 
   pcb = -> 1
 
+  # XXX TBD fix callback(s):
+  SQLitePlugin::executeSql = (statement, params, success, error) ->
+    console.log "SQLitePlugin::executeSql[Statement]"
+    pcb = success
+    cordova.exec (-> 1), error, "SQLitePlugin", "executePragmaStatement", [@dbname, statement, params]
+    return
+  
+  # DEPRECATED AND WILL BE REMOVED:
   SQLitePlugin::executePragmaStatement = (statement, success, error) ->
     console.log "SQLitePlugin::executePragmaStatement"
     pcb = success
@@ -72,162 +88,224 @@ do ->
 
       return
 
-  get_unique_id = ->
-    id = new Date().getTime()
-    id2 = new Date().getTime()
-    id2 = new Date().getTime()  while id is id2
-    id2 + "000"
+  uid = 1000
 
-  transaction_queue = []
-  transaction_callback_queue = {}
+  get_unique_id = -> ++uid
 
-  SQLitePluginTransaction = (dbname) ->
-    @dbname = dbname
+  trcbq = {}
+
+  SQLitePluginTransaction = (db, fn, error, success) ->
+    @trid = get_unique_id()
+    trcbq[@trid] = {}
+    if typeof(fn) != "function"
+      # This is consistent with the implementation in Chrome -- it
+      # throws if you pass anything other than a function. This also
+      # prevents us from stalling our txQueue if somebody passes a
+      # false value for fn.
+      throw new Error("transaction expected a function")
+    @db = db
+    @fn = fn
+    @error = error
+    @success = success
     @executes = []
-    @trans_id = get_unique_id()
-    @__completed = false
-    @__submitted = false
-    # this.optimization_no_nested_callbacks: default is false.
-    # if set to true large batches of queries within a transaction will be much faster but 
-    # you will lose the ability to do multi level nesting of executeSQL callbacks
-    @optimization_no_nested_callbacks = false
-    console.log "SQLitePluginTransaction - this.trans_id:" + @trans_id
-    transaction_queue[@trans_id] = []
-    transaction_callback_queue[@trans_id] = new Object()
+    @executeSql "BEGIN", [], null, (tx, err) ->
+      throw new Error("unable to begin transaction: " + err.message)
     return
 
-  SQLitePluginTransactionCB = {}
+  SQLiteTransactionCB = {}
 
-  SQLitePluginTransactionCB.queryCompleteCallback = (transId, queryId, result) ->
-    console.log "SQLitePluginTransaction.queryCompleteCallback"
-    query = null
-    for x of transaction_queue[transId]
-      if transaction_queue[transId][x]["query_id"] is queryId
-        query = transaction_queue[transId][x]
-        if transaction_queue[transId].length is 1
-          transaction_queue[transId] = []
-        else
-          transaction_queue[transId].splice x, 1
-        break
-    query["callback"] result  if query and query["callback"]
+  SQLiteTransactionCB.queryCompleteCallback = (transId, queryId, result) ->
+    #console.log "SQLiteTransactionCB.queryCompleteCallback"
 
-  SQLitePluginTransactionCB.queryErrorCallback = (transId, queryId, result) ->
-    query = null
-    for x of transaction_queue[transId]
-      if transaction_queue[transId][x]["query_id"] is queryId
-        query = transaction_queue[transId][x]
-        if transaction_queue[transId].length is 1
-          transaction_queue[transId] = []
-        else
-          transaction_queue[transId].splice x, 1
-        break
-    query["err_callback"] result  if query and query["err_callback"]
+    t = trcbq[transId]
 
-  SQLitePluginTransactionCB.txCompleteCallback = (transId) ->
-    unless typeof transId is "undefined"
-      transaction_callback_queue[transId]["success"]()  if transId and transaction_callback_queue[transId] and transaction_callback_queue[transId]["success"]
-    else
-      console.log "SQLitePluginTransaction.txCompleteCallback---transId = NULL"
+    if t
+      q = t[queryId]
 
-  SQLitePluginTransactionCB.txErrorCallback = (transId, error) ->
-    unless typeof transId is "undefined"
-      console.log "SQLitePluginTransaction.txErrorCallback---transId:" + transId
-      transaction_callback_queue[transId]["error"] error  if transId and transaction_callback_queue[transId]["error"]
-      delete transaction_queue[transId]
+      if q
+        if q["success"]
+          q["success"] result
 
-      delete transaction_callback_queue[transId]
-    else
-      console.log "SQLitePluginTransaction.txErrorCallback---transId = NULL"
+        # ???:
+        delete trcbq[transId][queryId]
 
-  SQLitePluginTransaction::add_to_transaction = (trans_id, query, params, callback, err_callback) ->
-    new_query = new Object()
-    new_query["trans_id"] = trans_id
+    return
 
-    if callback or not @optimization_no_nested_callbacks
-      new_query["query_id"] = get_unique_id()
-    else new_query["query_id"] = ""  if @optimization_no_nested_callbacks
+  SQLiteTransactionCB.queryErrorCallback = (transId, queryId, result) ->
+    #console.log "query errror cb trid " + transId + " qid " + queryId
 
-    new_query["query"] = query
+    t = trcbq[transId]
 
-    if params
-      new_query["params"] = params
-    else
-      new_query["params"] = []
+    if t
+      q = t[queryId]
 
-    new_query["callback"] = callback
-    new_query["err_callback"] = err_callback
+      if q
+        if q["error"]
+          q["error"] result
 
-    transaction_queue[trans_id] = []  unless transaction_queue[trans_id]
-    transaction_queue[trans_id].push new_query
+        # ???:
+        delete trcbq[transId][queryId]
+
+    return
+
+  # ???:
+  SQLiteTransactionCB.txCompleteCallback = (transId) ->
+    return
+
+  # ???:
+  SQLiteTransactionCB.txErrorCallback = (transId, error) ->
+    return
+
+  SQLitePluginTransaction::start = ->
+    try
+      return  unless @fn
+      @fn this
+      @fn = null
+      @run()
+    catch err
+      # If "fn" throws, we must report the whole transaction as failed.
+      @db.startNextTransaction()
+      if @error
+        @error err
     return
 
   SQLitePluginTransaction::executeSql = (sql, values, success, error) ->
-    console.log "SQLitePluginTransaction.prototype.executeSql"
-    errorcb = undefined
-    successcb = undefined
-    txself = undefined
-    txself = this
-    successcb = null
-    if success
-      console.log "success not null:" + sql
-      successcb = (execres) ->
-        console.log "executeSql callback:" + JSON.stringify(execres)
-        res = undefined
-        saveres = undefined
-        saveres = execres
-        res =
-          rows:
-            item: (i) ->
-              saveres[i]
+    #console.log "SQLitePluginTransaction::executeSql"
+    qid = get_unique_id()
 
-            length: saveres.length
+    @executes.push
+      #query: [sql].concat(values or [])
+      success: success
+      error: error
+      qid: qid
 
-          rowsAffected: saveres.rowsAffected
-          insertId: saveres.insertId or null
-
-        success txself, res
-    else
-      console.log "success NULL:" + sql
-    errorcb = null
-    if error
-      errorcb = (res) ->
-        error txself, res
-
-    console.log "executeSql - add_to_transaction" + sql
-    @add_to_transaction @trans_id, sql, values, successcb, errorcb
+      sql: sql
+      params: values
 
     return
 
-  SQLitePluginTransaction::complete = (success, error) ->
-    console.log "SQLitePluginTransaction.prototype.complete"
+  SQLitePluginTransaction::handleStatementSuccess = (handler, response) ->
+    if !handler
+      return
 
-    throw new Error("Transaction already run")  if @__completed
-    throw new Error("Transaction already submitted")  if @__submitted
+    rows = response.rows || []
+    payload =
+      rows:
+        item: (i) ->
+          rows[i]
 
-    @__submitted = true
-    txself = this
+        length: rows.length
 
-    successcb = ->
-      if transaction_queue[txself.trans_id].length > 0 and not txself.optimization_no_nested_callbacks
-        txself.__submitted = false
-        txself.complete success, error
-      else
-        @__completed = true
-        success txself  if success
+      rowsAffected: response.rowsAffected or 0
+      insertId: response.insertId or undefined
 
-    errorcb = (res) -> null
+    handler this, payload
 
-    if error
-      errorcb = (res) ->
-        error txself, res
+    return
 
-    transaction_callback_queue[@trans_id]["success"] = successcb
-    transaction_callback_queue[@trans_id]["error"] = errorcb
+  SQLitePluginTransaction::handleStatementFailure = (handler, response) ->
+    if !handler
+      throw new Error "a statement with no error handler failed: " + response.message
+    if handler(this, response)
+      throw new Error "a statement error callback did not return false"
+    return
 
-    cordova.exec null, null, "SQLitePlugin", "executeSqlBatch", [ @dbname, transaction_queue[@trans_id] ]
+  SQLitePluginTransaction::run = ->
+    #console.log "SQLitePluginTransaction::run"
+    txFailure = null
+
+    tropts = []
+    batchExecutes = @executes
+    waiting = batchExecutes.length
+    @executes = []
+    tx = this
+
+    handlerFor = (index, didSucceed) ->
+      (response) ->
+        try
+          if didSucceed
+            tx.handleStatementSuccess batchExecutes[index].success, response
+          else
+            tx.handleStatementFailure batchExecutes[index].error, response
+        catch err
+          txFailure = err  unless txFailure
+
+        if --waiting == 0
+          if txFailure
+            tx.rollBack txFailure
+          else if tx.executes.length > 0
+            # new requests have been issued by the callback
+            # handlers, so run another batch.
+            tx.run()
+          else
+            tx.commit()
+
+    i = 0
+
+    while i < batchExecutes.length
+      request = batchExecutes[i]
+
+      qid = request.qid
+
+      trcbq[@trid][qid] =
+        success: handlerFor(i, true)
+        error: handlerFor(i, false)
+
+      tropts.push
+        trans_id: @trid
+        query_id: qid
+        query: request.sql
+        params: request.params || []
+
+      i++
+
+    cordova.exec null, null, "SQLitePlugin", "executeSqlBatch", [ @db.dbname, tropts ]
+
+    return
+
+  SQLitePluginTransaction::rollBack = (txFailure) ->
+    if @finalized then return
+    tx = @
+
+    succeeded = ->
+      delete trcbq[@trid]
+      tx.db.startNextTransaction()
+      if tx.error then tx.error txFailure
+
+    failed = (tx, err) ->
+      delete trcbq[@trid]
+      tx.db.startNextTransaction()
+      if tx.error then tx.error new Error("error while trying to roll back: " + err.message)
+
+    @finalized = true
+    @executeSql "ROLLBACK", [], succeeded, failed
+    @run()
+    return
+
+  SQLitePluginTransaction::commit = ->
+    if @finalized then return
+    tx = @
+
+    succeeded = ->
+      delete trcbq[@trid]
+      tx.db.startNextTransaction()
+      if tx.success then tx.success()
+
+    failed = (tx, err) ->
+      delete trcbq[@trid]
+      tx.db.startNextTransaction()
+      if tx.error then tx.error new Error("error while trying to commit: " + err.message)
+
+    @finalized = true
+    @executeSql "COMMIT", [], succeeded, failed
+    @run()
     return
 
   SQLiteFactory =
+    # NOTE: this function should NOT be translated from Javascript
+    # back to CoffeeScript by js2coffee.
+    # If this function is edited in Javascript then someone will
+    # have to translate it back to CoffeeScript by hand.
     opendb: ->
       if arguments.length < 1 then return null
 
@@ -254,8 +332,12 @@ do ->
 
   # Required for callbacks:
   root.SQLitePluginCallback = SQLitePluginCallback
-  root.SQLitePluginTransactionCB = SQLitePluginTransactionCB
+  #root.SQLiteQueryCB = SQLiteQueryCB
+  root.SQLiteQueryCB = SQLiteTransactionCB
 
   root.sqlitePlugin =
+    sqliteFeatures:
+      isSQLitePlugin: true
+
     openDatabase: SQLiteFactory.opendb
 

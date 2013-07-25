@@ -68,8 +68,6 @@ public class SQLitePlugin extends CordovaPlugin
 	@Override
 	public boolean execute(String action, JSONArray args, CallbackContext cbc)
 	{
-		//Log.v("SQLitePlugin", "execute " + action);
-
 		try {
 			if (action.equals("open")) {
 				JSONObject o = args.getJSONObject(0);
@@ -103,7 +101,7 @@ public class SQLitePlugin extends CordovaPlugin
 
 				Cursor myCursor = this.getDatabase(dbName).rawQuery(query, params);
 
-				String result = this.getResultFromQuery(myCursor);
+				String result = this.getRowsResultFromQuery(myCursor).getJSONArray("rows").toString();
 
 				this.sendJavascriptCB("window.SQLitePluginCallback.p1('" + id + "', " + result + ");");
 			}
@@ -286,26 +284,18 @@ public class SQLitePlugin extends CordovaPlugin
 	 */
 	private void executeSqlBatch(String dbname, String[] queryarr, JSONArray[] jsonparams, String[] queryIDs, String tx_id, /* TODO GONE: */ boolean exc)
 	{
-		//Log.v("SQLitePlugin", "execute sql batch");
-
 		Long db = this.getDatabase(dbname);
 
 		if (db == null) return;
 
 		long mydb = db.longValue();
 
-		try {
-			/* XXX GONE: BEGIN (exclusive):
-			if (exc) {
-				mydb.beginTransaction();
-			}
-			**/
+		String query = "";
+		String query_id = "";
+		int len = queryarr.length;
 
-			String query = "";
-			String query_id = "";
-			int len = queryarr.length;
-
-			for (int i = 0; i < len; i++) {
+		for (int i = 0; i < len; i++) {
+			try {
 				query = queryarr[i];
 				query_id = queryIDs[i];
 
@@ -384,8 +374,7 @@ public class SQLitePlugin extends CordovaPlugin
 					step_return = SQLiteGlue.sqlg_st_step(st);
 
 					if ((step_return == 100) && query_id.length() > 0)
-						//query_result = this.getResultFromQuery(st);
-						query_result = "{ 'rows': " + this.getResultFromQuery(st) + "}";
+						query_result = this.getRowsResultFromQuery(st).toString();
 					else if (query_id.length() > 0) {
 						query_result = "{}";
 					}
@@ -402,52 +391,33 @@ public class SQLitePlugin extends CordovaPlugin
 					this.sendJavascriptCB("window.SQLiteQueryCB.queryCompleteCallback('" +
 						tx_id + "','" + query_id + "', " + query_result + ");");
 				}
+			} catch (Exception ex) {
+				ex.printStackTrace();
+				Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  ex.getMessage());
+				this.sendJavascriptCB("window.SQLiteQueryCB.queryErrorCallback('" +
+					tx_id + "','" + query_id + "', '" + ex.getMessage() + "');");
 			}
-
-			/* XXX GONE: Mark for COMMIT:
-			if (exc) {
-				mydb.setTransactionSuccessful();
-			}
-			**/
-		}
-		/**
-		catch (SQLiteException ex) {
-			ex.printStackTrace();
-			Log.v("executeSqlBatch", "SQLitePlugin.executeSql(): Error=" +  ex.getMessage());
-			this.sendJavascriptCB("window.SQLitePluginTransactionCB.txErrorCallback('" + tx_id + "', '"+ex.getMessage()+"');");
-		} **/
-		catch (JSONException ex) {
-			ex.printStackTrace();
-			Log.v("executeSqlBatch", "SQLitePlugin.executeSql(): Error=" +  ex.getMessage());
-			this.sendJavascriptCB("window.SQLiteQueryCB.txErrorCallback('" + tx_id + "', '"+ex.getMessage()+"');");
-		}
-		finally {
-			/* XXX GONE: COMMIT or ROLLBACK:
-			if (exc) {
-				mydb.endTransaction();
-			}
-			**/
-			Log.v("executeSqlBatch", tx_id);
-			this.sendJavascriptCB("window.SQLiteQueryCB.txCompleteCallback('" + tx_id + "');");
 		}
 	}
 
 	/**
-	 * Get results JSON string from query cursor.
+	 * Get rows results from query [TBD XXX].
 	 *
 	 * @param cur
-	 *            Cursor into query results
+	 *            [TBD XXX] Cursor into query results
 	 *
-	 * @return results in string form
+	 * @return results in [TBD XXX] form
 	 *
 	 */
-	private String getResultFromQuery(long st)
+	private JSONObject getRowsResultFromQuery(long st)
 	{
-		String result = "[]";
+		JSONObject rowsResult = new JSONObject();
 
 		// If query result has rows
-		//if (cur.moveToFirst()) {
-			JSONArray fullresult = new JSONArray();
+		//if (cur.moveToFirst())
+		{
+			JSONArray rowsArrayResult = new JSONArray();
+
 			String key = "";
 
 			int colCount = SQLiteGlue.sqlg_st_column_count(st);
@@ -487,7 +457,7 @@ public class SQLitePlugin extends CordovaPlugin
 						}
 					}
 
-					fullresult.put(row);
+					rowsArrayResult.put(row);
 
 				} catch (JSONException e) {
 					e.printStackTrace();
@@ -495,10 +465,14 @@ public class SQLitePlugin extends CordovaPlugin
 
 			} while (SQLiteGlue.sqlg_st_step(st) == 100); /* SQLITE_ROW */
 
-			result = fullresult.toString();
-		//}
+			try {
+				rowsResult.put("rows", rowsArrayResult);
+			} catch (JSONException e) {
+				e.printStackTrace();
+			}
+		}
 
-		return result;
+		return rowsResult;
 	}
 
 	/**

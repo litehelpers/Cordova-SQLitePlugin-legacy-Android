@@ -62,7 +62,7 @@ public class SQLitePlugin extends CordovaPlugin
 	 *            JSONArry of arguments for the plugin.
 	 *
 	 * @param cbc
-	 *            Callback context from Cordova API (not used here)
+	 *            Callback context from Cordova API
 	 *
 	 */
 	@Override
@@ -142,9 +142,9 @@ public class SQLitePlugin extends CordovaPlugin
 					boolean ex = action.equals("executeBatchTransaction");
 
 					if (action.equals("backgroundExecuteSqlBatch"))
-						this.executeSqlBatchInBackground(dbName, queries, jsonparams, queryIDs, trans_id, ex);
+						this.executeSqlBatchInBackground(dbName, queries, jsonparams, queryIDs, trans_id, cbc);
 					else
-						this.executeSqlBatch(dbName, queries, jsonparams, queryIDs, trans_id, ex);
+						this.executeSqlBatch(dbName, queries, jsonparams, queryIDs, trans_id, cbc);
 				} else
 					Log.v("error", "null trans_id");
 			}
@@ -250,15 +250,18 @@ public class SQLitePlugin extends CordovaPlugin
 	 * @param tx_id
 	 *            Transaction id
 	 *
+	 * @param cbc
+	 *            Callback context from Cordova API
+	 *
 	 */
 	private void executeSqlBatchInBackground(final String dbName,
-		final String[] queryarr, final JSONArray[] jsonparams, final String[] queryIDs, final String tx_id, final boolean ex)
+		final String[] queryarr, final JSONArray[] jsonparams, final String[] queryIDs, final String tx_id, final CallbackContext cbc)
 	{
 		final SQLitePlugin myself = this;
 
 		this.cordova.getThreadPool().execute(new Runnable() {
 			public void run() {
-				myself.executeSqlBatch(dbName, queryarr, jsonparams, queryIDs, tx_id, ex);
+				myself.executeSqlBatch(dbName, queryarr, jsonparams, queryIDs, tx_id, cbc);
 			}
 		});
 	}
@@ -278,11 +281,11 @@ public class SQLitePlugin extends CordovaPlugin
 	 * @param queryIDs
 	 *            Array of query ids
 	 *
-	 * @param tx_id
-	 *            Transaction id
+	 * @param cbc
+	 *            Callback context from Cordova API
 	 *
 	 */
-	private void executeSqlBatch(String dbname, String[] queryarr, JSONArray[] jsonparams, String[] queryIDs, String tx_id, /* TODO GONE: */ boolean exc)
+	private void executeSqlBatch(String dbname, String[] queryarr, JSONArray[] jsonparams, String[] queryIDs, String tx_id, CallbackContext cbc)
 	{
 		Long db = this.getDatabase(dbname);
 
@@ -304,9 +307,6 @@ public class SQLitePlugin extends CordovaPlugin
 
 			try {
 				query = queryarr[i];
-				//query_id = queryIDs[i];
-
-				String query_result = "";
 
 				int step_return = 0;
 
@@ -336,8 +336,6 @@ public class SQLitePlugin extends CordovaPlugin
 
 					int rowsAffected = myStatement.executeUpdateDelete();
 
-					query_result = "{'rowsAffected':" + rowsAffected + "}";
-
 					queryResult = new JSONObject();
 					queryResult.put("rowsAffected", rowsAffected);
 				} else // to HERE. */
@@ -364,9 +362,6 @@ public class SQLitePlugin extends CordovaPlugin
 
 					SQLiteGlue.sqlg_st_finish(st);
 
-					//query_result = "{'insertId':'" + insertId + "', 'rowsAffected':'" + rowsAffected +"'}";
-					query_result = "{'rowsAffected':1}";
-
 					queryResult = new JSONObject();
 					// XXX TODO [insertId]:
 					//queryResult.put("insertId", insertId);
@@ -391,35 +386,24 @@ public class SQLitePlugin extends CordovaPlugin
 
 					if ((step_return == 100) && query_id.length() > 0)
 					{
-						//query_result = this.getRowsResultFromQuery(st).toString();
 						queryResult = this.getRowsResultFromQuery(st);
-						query_result = queryResult.toString();
 					}
 					else if (query_id.length() > 0) {
-						query_result = "{}";
 						queryResult = new JSONObject();
 					}
 
 					//SQLiteGlue.sqlg_st_finish(st);
 				}
 
+				// XXX TBD ?? cleanup:
 				if (step_return != 0 && step_return < 100) {
-					this.sendJavascriptCB("window.SQLiteQueryCB.queryErrorCallback('" +
-						tx_id + "','" + query_id + "', '" + "query failure" + "');");
-				}
-				else
-				if (query_result.length() > 0) {
-					this.sendJavascriptCB("window.SQLiteQueryCB.queryCompleteCallback('" +
-						tx_id + "','" + query_id + "', " + query_result + ");");
-
+					queryResult = null;
+					errorMessage = "query failure";
 				}
 			} catch (Exception ex) {
 				ex.printStackTrace();
-				Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  ex.getMessage());
-				this.sendJavascriptCB("window.SQLiteQueryCB.queryErrorCallback('" +
-					tx_id + "','" + query_id + "', '" + ex.getMessage() + "');");
-
 				errorMessage = ex.getMessage();
+				Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  errorMessage);
 			}
 
 			try {
@@ -447,9 +431,18 @@ public class SQLitePlugin extends CordovaPlugin
 			}
 		}
 
-		String br = batchResults.toString();
+		JSONObject cbr = new JSONObject();
 
-		this.sendJavascriptCB("window.SQLiteTransactionCB.batchCompleteCallback('" + tx_id + "', " + br + ");");
+		try {
+			cbr.put("trid", tx_id);
+			cbr.put("result", batchResults);
+		} catch (JSONException ex) {
+			ex.printStackTrace();
+			Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  ex.getMessage());
+			// TODO what to do?
+		}
+
+		cbc.success(cbr);
 	}
 
 	/**

@@ -294,10 +294,17 @@ public class SQLitePlugin extends CordovaPlugin
 		String query_id = "";
 		int len = queryarr.length;
 
+		JSONArray batchResults = new JSONArray();
+
 		for (int i = 0; i < len; i++) {
+			query_id = queryIDs[i];
+
+			JSONObject queryResult = null;
+			String errorMessage = null;
+
 			try {
 				query = queryarr[i];
-				query_id = queryIDs[i];
+				//query_id = queryIDs[i];
 
 				String query_result = "";
 
@@ -330,6 +337,9 @@ public class SQLitePlugin extends CordovaPlugin
 					int rowsAffected = myStatement.executeUpdateDelete();
 
 					query_result = "{'rowsAffected':" + rowsAffected + "}";
+
+					queryResult = new JSONObject();
+					queryResult.put("rowsAffected", rowsAffected);
 				} else // to HERE. */
 				if (query.toLowerCase().startsWith("insert") && jsonparams != null) {
 					/* prepare/compile statement: */
@@ -356,6 +366,12 @@ public class SQLitePlugin extends CordovaPlugin
 
 					//query_result = "{'insertId':'" + insertId + "', 'rowsAffected':'" + rowsAffected +"'}";
 					query_result = "{'rowsAffected':1}";
+
+					queryResult = new JSONObject();
+					// XXX TODO [insertId]:
+					//queryResult.put("insertId", insertId);
+					// XXX TODO [fix rowsAffected]:
+					queryResult.put("rowsAffected", 1);
 				} else {
 					long st = SQLiteGlue.sqlg_db_prepare_st(mydb, query);
 
@@ -374,9 +390,14 @@ public class SQLitePlugin extends CordovaPlugin
 					step_return = SQLiteGlue.sqlg_st_step(st);
 
 					if ((step_return == 100) && query_id.length() > 0)
-						query_result = this.getRowsResultFromQuery(st).toString();
+					{
+						//query_result = this.getRowsResultFromQuery(st).toString();
+						queryResult = this.getRowsResultFromQuery(st);
+						query_result = queryResult.toString();
+					}
 					else if (query_id.length() > 0) {
 						query_result = "{}";
+						queryResult = new JSONObject();
 					}
 
 					//SQLiteGlue.sqlg_st_finish(st);
@@ -390,14 +411,45 @@ public class SQLitePlugin extends CordovaPlugin
 				if (query_result.length() > 0) {
 					this.sendJavascriptCB("window.SQLiteQueryCB.queryCompleteCallback('" +
 						tx_id + "','" + query_id + "', " + query_result + ");");
+
 				}
 			} catch (Exception ex) {
 				ex.printStackTrace();
 				Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  ex.getMessage());
 				this.sendJavascriptCB("window.SQLiteQueryCB.queryErrorCallback('" +
 					tx_id + "','" + query_id + "', '" + ex.getMessage() + "');");
+
+				errorMessage = ex.getMessage();
+			}
+
+			try {
+				if (queryResult != null) {
+					JSONObject r = new JSONObject();
+					r.put("qid", query_id);
+
+					r.put("type", "success");
+					r.put("result", queryResult);
+
+					batchResults.put(r);
+				} else if (errorMessage != null) {
+					JSONObject r = new JSONObject();
+					r.put("qid", query_id);
+
+					r.put("type", "error");
+					r.put("result", errorMessage);
+
+					batchResults.put(r);
+				}
+			} catch (JSONException ex) {
+				ex.printStackTrace();
+				Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  ex.getMessage());
+				// TODO what to do?
 			}
 		}
+
+		String br = batchResults.toString();
+
+		this.sendJavascriptCB("window.SQLiteTransactionCB.batchCompleteCallback('" + tx_id + "', " + br + ");");
 	}
 
 	/**

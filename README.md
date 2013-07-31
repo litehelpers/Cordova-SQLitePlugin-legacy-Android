@@ -2,7 +2,7 @@
 
 Native interface to sqlite in a Cordova/PhoneGap plugin, working to follow the HTML5 Web SQL API as close as possible.
 
-Extracted from DroidGap by @brodyspark (Chris Brody)
+Extracted from DroidGap by @brodybits (Chris Brody)
 
 Nested transaction callback support by @marcucio
 
@@ -10,6 +10,7 @@ License for this version: MIT or Apache
 
 ## Announcements
 
+- This version has been updated to support background processing. To enable background processing open a database like: `var db = window.sqlitePlugin.openDatabase({name: "DB", bgType: 1}});`
 - Forum & community support at: http://groups.google.com/group/pgsqlite
 - New, optional interface to open a database like: `var db = window.sqlitePlugin.openDatabase({name: "DB"});`
  
@@ -28,7 +29,6 @@ License for this version: MIT or Apache
 
 ## Known limitations
 
-- `rowsAffected` field in the response to UPDATE and DELETE is not working
 - The db version, display name, and size parameter values are not supported and will be ignored.
 - The sqlite plugin will not work before the callback for the "deviceready" event has been fired, as described in **Usage**.
 - This version is missing automatic transaction rollback upon failure.
@@ -131,22 +131,23 @@ In this case, the same transaction in the first executeSql() callback is being r
 
 This case will also works with WebKit, assuming you replace window.sqlitePlugin.openDatabase with window.openDatabase.
 
-# Installing
+# Installation
 
-**NOTE:** There are now the following trees:
+**NOTE:** This plugin is now prepared to be installed using either the `plugman` or `cordova` tool.
 
-- `assets`: contains Javascript
+## Source tree
+
+- `cs`: Coffeescript version
+- `www`: Javascript
 - `src`: Android Java code
 - `test-www`: simple testing in `index.html` using qunit 1.5.0
 
-## Android platform installation
-
-**NOTE:** Cordova/PhoneGap 3.0 is not supported yet, still upcoming.
+## Manual installation
 
 These installation instructions are based on the Android example project from Cordova/PhoneGap 2.7.0. For your first time please unzip the PhoneGap 2.7 zipball and use the `lib/android/example` subdirectory.
 
- - Install assets/www/SQLitePlugin.js from this repository into assets/www subdirectory
- - Install org/pgsqlite/SQLitePlugin.java from this repository into src/org/pgsqlite subdirectory
+ - Install www/SQLitePlugin.js from this repository into assets/www subdirectory
+ - Install src/android/org/pgsqlite/SQLitePlugin.java from this repository into src/org/pgsqlite subdirectory
  - Add the plugin element <plugin name="SQLitePlugin" value="org.pgsqlite.SQLitePlugin"/> to res/xml/config.xml
 
 Sample change to res/xml/config.xml:
@@ -250,5 +251,5 @@ Unit testing is done in `test-www/index.html`. To run the test(s) yourself pleas
 - Reporting issues to the [pgsqlite forum](http://groups.google.com/group/pgsqlite) can help improve the quality of this plugin.
 - Patches with bug fixes are helpful, especially when submitted with test code.
 - Other enhancements will be considered if they do not increase the complexity of this plugin.
-- All contributions may be reused by [@brodyspark](https://github.com/brodyspark) under another license in the future. Efforts will be taken to give credit for major contributions but it will not be guaranteed.
+- All contributions may be reused by [@brodybits (Chris Brody)](https://github.com/brodybits) under another license in the future. Efforts will be taken to give credit for major contributions but it will not be guaranteed.
 

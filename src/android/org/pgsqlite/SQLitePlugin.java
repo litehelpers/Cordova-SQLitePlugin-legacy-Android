@@ -397,13 +397,9 @@ public class SQLitePlugin extends CordovaPlugin
 				if (step_return != 0 && step_return < 100) {
 					queryResult = null;
 					errorMessage = "query failure";
+					// XXX TBD add mapping:
+					errorCode = 0; /* UNKNOWN_ERR */
 				}
-			} catch (SQLiteConstraintException ex) {
-				ex.printStackTrace();
-				errorMessage = ex.getMessage();
-				errorCode = 6; /* CONSTRAINT_ERR */
-				Log.v("executeSqlBatch", "SQLitePlugin.executeSql[Batch](): Error=" +  errorMessage);
-			// XXX TBD other SQLite exceptions to map...
 			} catch (Exception ex) {
 				ex.printStackTrace();
 				errorMessage = ex.getMessage();

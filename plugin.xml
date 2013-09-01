@@ -12,10 +12,6 @@
 
     <license>MIT or Apache</license>
 
-    <engines>
-        <engine name="cordova" version=">=2.0.0" />
-    </engines>    
-
     <asset src="www/SQLitePlugin.js" target="SQLitePlugin.js" />
 
     <!-- android -->
@@ -27,11 +23,10 @@
                 </intent-filter>
             </activity>
         </config-file>
-
-        <!-- Cordova >= 2.0.0 -->
-        <config-file target="res/xml/config.xml" parent="plugins">
-            <plugin name="SQLitePlugin"
-                value="org.pgsqlite.SQLitePlugin"/>
+        <config-file target="res/xml/config.xml" parent="/*">
+          <feature name="SQLitePlugin" >
+            <param name="android-package" value="org.pgsqlite.SQLitePlugin"/>
+          </feature>
         </config-file>
 
         <source-file src="src/android/org/pgsqlite/SQLitePlugin.java" target-dir="src/org/pgsqlite"/>
